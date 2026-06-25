@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+shopify_config.json
+*.log

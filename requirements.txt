@@ -1,0 +1,4 @@
+flask>=2.3.0
+httpx>=0.24.0
+fake-useragent>=1.4.0
+gunicorn>=21.2.0
