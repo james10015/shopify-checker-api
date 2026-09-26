@@ -331,7 +331,7 @@ class ShopifyChecker:
             client_kwargs = {
                 'timeout': 45.0,
                 'follow_redirects': True,
-                'verify': False,
+               'verify': True,
                 'headers': {'User-Agent': self.ua.random}
             }
             if self.proxy:
@@ -2675,7 +2675,7 @@ def test_proxy_endpoint():
         asyncio.set_event_loop(loop)
         
         async def test():
-            async with httpx.AsyncClient(proxy=proxy, timeout=15) as client:
+            async with httpx.AsyncClient(proxy=proxy, timeout=15, verify=True) as client:
                 resp = await client.get('https://api.ipify.org?format=json')
                 return resp.json().get('ip')
         
