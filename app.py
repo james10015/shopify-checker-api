@@ -2421,61 +2421,67 @@ def health():
 # Shopify api source code 
 # Telegram: https://t.me/afuonax
 # Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+@app.route('/')
+def home():
+    return render_template_string(HTML_TEMPLATE)
+
+
+@app.route('/health')
+def health():
+    return jsonify({
+        "status": "healthy",
+        "type": "shopify",
+        "version": "2.0",
+        "features": ["proxy_all_formats", "concurrent_mass_check", "auto_retry",
+                     "full_card_display", "polling", "pagination", "phone_number"]
+    })
+
+
 @app.route('/check')
 def check_card():
     """Check a single card with auto retry"""
     try:
-        key = request.args.get('key')
         site = request.args.get('site')
         cc = request.args.get('cc')
         proxy_str = request.args.get('proxy')
-        
-        if key != API_KEY:
-            return jsonify({"error": "Invalid API key"}), 401
-        
+
         if not site:
             return jsonify({"error": "Missing 'site' parameter"}), 400
         if not cc:
             return jsonify({"error": "Missing 'cc' parameter"}), 400
-        
-        # Validate card format
+
         if not re.match(r'^\d{13,19}\|\d{1,2}\|\d{2,4}\|\d{3,4}$', cc):
             return jsonify({"error": "Invalid card format. Use: NUMBER|MM|YY|CVV"}), 400
-        
-        # Parse site
+
         site = site.replace('https://', '').replace('http://', '').split('/')[0]
         site_url = f'https://{site}'
-        
-        # Parse proxy (optional)
+
         proxy = None
         if proxy_str:
             proxy = parse_proxy_ultimate(proxy_str)
             if not proxy:
                 return jsonify({"error": "Invalid proxy format"}), 400
-        
+
         logger.info(f"Checking card on {site_url}")
-        
-        # Run check with retry
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
         checker = ShopifyChecker(proxy=proxy)
-        
+
         async def run_check():
             return await with_retry(checker.process_card, 2, site_url, cc)
-        
+
         result = loop.run_until_complete(run_check())
         loop.close()
-        
-        # Format response
+
         status_map = {
             'charged': 'CHARGED',
-            'approved': 'APPROVED', 
+            'approved': 'APPROVED',
             'declined': 'DECLINED',
             'error': 'ERROR',
             'unknown': 'UNKNOWN'
         }
-        
+
         return jsonify({
             "success": result['status'] in ['charged', 'approved'],
             "card": cc,
@@ -2484,50 +2490,44 @@ def check_card():
             "price": result.get('price', 'N/A'),
             "site": site
         })
-        
+
     except Exception as e:
         logger.error(f"Check error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.route('/mass')
 def mass_check():
-    """Mass check multiple cards with concurrent workers (4x faster)"""
+    """Mass check multiple cards with concurrent workers"""
     try:
-        key = request.args.get('key')
         site = request.args.get('site')
         proxy_str = request.args.get('proxy')
         cards_param = request.args.get('cards')
-        
-        if key != API_KEY:
-            return jsonify({"error": "Invalid API key"}), 401
-        
+
         if not site:
             return jsonify({"error": "Missing 'site' parameter"}), 400
         if not cards_param:
             return jsonify({"error": "Missing 'cards' parameter"}), 400
-        
+
         proxy = None
         if proxy_str:
             proxy = parse_proxy_ultimate(proxy_str)
             if not proxy:
                 return jsonify({"error": "Invalid proxy format"}), 400
-        
+
         site = site.replace('https://', '').replace('http://', '').split('/')[0]
         site_url = f'https://{site}'
-        
-        cards = cards_param.split(',')[:100]  # Max 100 cards
-        
-        logger.info(f"Mass checking {len(cards)} cards on {site_url} with 4 workers")
-        
+
+        cards = cards_param.split(',')[:100]
+
+        logger.info(f"Mass checking {len(cards)} cards on {site_url}")
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         async def process_with_workers():
-            semaphore = asyncio.Semaphore(4)  # 4 concurrent workers
-            
+            semaphore = asyncio.Semaphore(4)
+
             async def process_one(card):
                 async with semaphore:
                     checker = ShopifyChecker(proxy=proxy)
@@ -2538,19 +2538,18 @@ def mass_check():
                         "message": result['message'][:100],
                         "price": result.get('price', 'N/A')
                     }
-            
+
             tasks = [process_one(card) for card in cards]
             return await asyncio.gather(*tasks)
-        
+
         results = loop.run_until_complete(process_with_workers())
         loop.close()
-        
-        # Calculate stats
+
         charged = len([r for r in results if r['status'] == 'CHARGED'])
         approved = len([r for r in results if r['status'] == 'APPROVED'])
         declined = len([r for r in results if r['status'] == 'DECLINED'])
         errors = len([r for r in results if r['status'] == 'ERROR'])
-        
+
         return jsonify({
             "site": site,
             "total": len(results),
@@ -2560,135 +2559,94 @@ def mass_check():
             "errors": errors,
             "results": results
         })
-        
+
     except Exception as e:
         logger.error(f"Mass check error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.route('/test_site')
 def test_site_endpoint():
     try:
-        key = request.args.get('key')
         site = request.args.get('site')
         proxy_str = request.args.get('proxy')
-        
-        if key != API_KEY:
-            return jsonify({"error": "Invalid API key"}), 401
-        
+
         if not site:
             return jsonify({"error": "Missing 'site' parameter"}), 400
-        
+
         proxy = None
         if proxy_str:
             proxy = parse_proxy_ultimate(proxy_str)
             if not proxy:
                 return jsonify({"error": "Invalid proxy format"}), 400
-        
+
         site = site.replace('https://', '').replace('http://', '').split('/')[0]
         site_url = f'https://{site}'
-        
-        # Use test card
+
         test_card = "4031630422575208|01|2030|280"
-        
+
         logger.info(f"Testing site: {site_url}")
-        
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
         checker = ShopifyChecker(proxy=proxy)
-        
+
         async def run_test():
             return await with_retry(checker.process_card, 2, site_url, test_card)
-        
+
         result = loop.run_until_complete(run_test())
         loop.close()
-        
+
         if result['status'] == 'charged':
-            return jsonify({
-                "domain": site,
-                "working": True,
-                "status": "CHARGED",
-                "response": result['message']
-            })
+            return jsonify({"domain": site, "working": True, "status": "CHARGED", "response": result['message']})
         elif result['status'] == 'approved':
-            return jsonify({
-                "domain": site,
-                "working": True,
-                "status": "APPROVED",
-                "response": result['message']
-            })
+            return jsonify({"domain": site, "working": True, "status": "APPROVED", "response": result['message']})
         elif "insufficient" in result['message'].lower():
-            return jsonify({
-                "domain": site,
-                "working": True,
-                "status": "NO BALANCE",
-                "response": result['message']
-            })
+            return jsonify({"domain": site, "working": True, "status": "NO BALANCE", "response": result['message']})
         elif "3d" in result['message'].lower() or "secure" in result['message'].lower():
-            return jsonify({
-                "domain": site,
-                "working": True,
-                "status": "3D",
-                "response": result['message']
-            })
+            return jsonify({"domain": site, "working": True, "status": "3D", "response": result['message']})
         elif "declined" in result['message'].lower():
-            return jsonify({
-                "domain": site,
-                "working": True,
-                "status": "DECLINED",
-                "response": result['message']
-            })
+            return jsonify({"domain": site, "working": True, "status": "DECLINED", "response": result['message']})
         else:
-            return jsonify({
-                "domain": site,
-                "working": False,
-                "status": "DEAD",
-                "response": result['message']
-            })
-        
+            return jsonify({"domain": site, "working": False, "status": "DEAD", "response": result['message']})
+
     except Exception as e:
         logger.error(f"Test site error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.route('/test_proxy')
 def test_proxy_endpoint():
-    """Test if a proxy is working"""
     try:
         proxy_str = request.args.get('proxy')
-        
+
         if not proxy_str:
             return jsonify({"error": "Missing 'proxy' parameter"}), 400
-        
+
         proxy = parse_proxy_ultimate(proxy_str)
         if not proxy:
             return jsonify({"error": "Invalid proxy format"}), 400
-        
+
         logger.info(f"Testing proxy: {proxy[:50]}...")
-        
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         async def test():
             async with httpx.AsyncClient(proxy=proxy, timeout=15, verify=True) as client:
                 resp = await client.get('https://api.ipify.org?format=json')
                 return resp.json().get('ip')
-        
+
         ip = loop.run_until_complete(test())
         loop.close()
-        
+
         return jsonify({
             "success": True,
             "ip": ip,
             "proxy": proxy_str,
             "type": "HTTP/HTTPS" if "http" in proxy else "SOCKS"
         })
-        
+
     except Exception as e:
         logger.error(f"Proxy test failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 400
@@ -2696,17 +2654,12 @@ def test_proxy_endpoint():
 
 @app.route('/stats')
 def stats():
-    """Get API statistics"""
     try:
-        key = request.args.get('key')
-        
-              key = request.args.get('key')
-        
         return jsonify({
             "api_version": "2.0",
             "features": [
                 "proxy_all_formats",
-                "concurrent_mass_check", 
+                "concurrent_mass_check",
                 "auto_retry",
                 "full_card_display",
                 "site_testing",
@@ -2724,44 +2677,36 @@ def stats():
             ],
             "message": "API is ready to use"
         })
-        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.route('/add_sites')
 def add_sites():
     try:
-        key = request.args.get('key')
         sites_param = request.args.get('sites')
-        
-        if key != API_KEY:
-            return jsonify({"error": "Invalid API key"}), 401
-        
+
         if not sites_param:
             return jsonify({"error": "Missing 'sites' parameter"}), 400
-        
+
         sites = [s.strip() for s in sites_param.split(',') if s.strip()]
-        
-        # Save to file
+
         try:
             config = {}
             if os.path.exists('shopify_config.json'):
                 with open('shopify_config.json', 'r') as f:
                     config = json.load(f)
-            
+
             existing_sites = set(config.get('available_sites', []))
             new_sites = [s for s in sites if s not in existing_sites]
-            
+
             config['available_sites'] = list(existing_sites) + new_sites
             config['banned_sites'] = config.get('banned_sites', [])
             config['proxies'] = config.get('proxies', [])
-            
+
             with open('shopify_config.json', 'w') as f:
                 json.dump(config, f, indent=2)
-            
+
             return jsonify({
                 "success": True,
                 "added": len(new_sites),
@@ -2769,44 +2714,37 @@ def add_sites():
             })
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.route('/add_proxies')
 def add_proxies():
     try:
-        key = request.args.get('key')
         proxies_param = request.args.get('proxies')
-        
-        if key != API_KEY:
-            return jsonify({"error": "Invalid API key"}), 401
-        
+
         if not proxies_param:
             return jsonify({"error": "Missing 'proxies' parameter"}), 400
-        
+
         proxies = [p.strip() for p in proxies_param.split(',') if p.strip()]
-        
-        # Save to file
+
         try:
             config = {}
             if os.path.exists('shopify_config.json'):
                 with open('shopify_config.json', 'r') as f:
                     config = json.load(f)
-            
+
             existing_proxies = set(config.get('proxies', []))
             new_proxies = [p for p in proxies if p not in existing_proxies]
-            
+
             config['available_sites'] = config.get('available_sites', [])
             config['banned_sites'] = config.get('banned_sites', [])
             config['proxies'] = list(existing_proxies) + new_proxies
-            
+
             with open('shopify_config.json', 'w') as f:
                 json.dump(config, f, indent=2)
-            
+
             return jsonify({
                 "success": True,
                 "added": len(new_proxies),
@@ -2814,34 +2752,26 @@ def add_proxies():
             })
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Endpoint not found. See / for available endpoints"}), 404
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 @app.errorhandler(500)
 def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
-# Shopify api source code 
-# Telegram: https://t.me/afuonax
-# Developer: 𓆩𝗔𓆪𝗙𝗨𝗢𝗡𝗔
+
 if __name__ == '__main__':
     print("=" * 60)
     print(" SHOPIFY CHECKER API - COMPLETE V2")
     print("=" * 60)
     print(f" Running on port: {PORT}")
-    print(f" API Key: {API_KEY}")
-    print(f" Version: 2.0 (Complete)")
+    print(" API Key: DISABLED")
     print("=" * 60)
-    
     app.run(host='0.0.0.0', port=PORT, debug=False)
